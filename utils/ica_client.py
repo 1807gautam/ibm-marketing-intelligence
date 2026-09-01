@@ -13,17 +13,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def _secret(key: str, default: str = "") -> str:
-    """Read from st.secrets first, fall back to env vars."""
+def _get_secret(key: str, default: str = "") -> str:
+    """
+    Read credentials lazily — called at request time, not import time.
+    Tries st.secrets first (Streamlit Cloud), falls back to env vars (.env).
+    """
     try:
         import streamlit as st
-        return st.secrets.get(key, os.getenv(key, default))
+        val = st.secrets.get(key)
+        if val:
+            return val
     except Exception:
-        return os.getenv(key, default)
+        pass
+    return os.getenv(key, default)
 
-ICA_API_KEY  = _secret("ICA_API_KEY")
-ICA_BASE_URL = _secret("ICA_BASE_URL", "https://api.nextgen-beta.ica.ibm.com/ica/v1")
-ICA_MODEL    = _secret("ICA_MODEL", "claude-sonnet-4-5")
+
+def _api_key()  -> str: return _get_secret("ICA_API_KEY")
+def _base_url() -> str: return _get_secret("ICA_BASE_URL", "https://api.nextgen-beta.ica.ibm.com/ica/v1")
+def _model()    -> str: return _get_secret("ICA_MODEL", "claude-sonnet-4-5")
+
+# Keep module-level names for backwards compatibility (local .env still works)
+ICA_API_KEY  = os.getenv("ICA_API_KEY", "")
+ICA_BASE_URL = os.getenv("ICA_BASE_URL", "https://api.nextgen-beta.ica.ibm.com/ica/v1")
+ICA_MODEL    = os.getenv("ICA_MODEL", "claude-sonnet-4-5")
 
 # Hard cap for the raw combined document context sent to the pre-summariser.
 # The pre-summariser output (~6 000–10 000 chars) is what every tab actually uses.
@@ -42,16 +54,20 @@ def call_ica(system_prompt: str, user_prompt: str, max_tokens: int = 8192) -> st
     Send a chat completion request to the ICA endpoint.
     Returns the assistant's reply text, or an error string.
     """
-    if not ICA_API_KEY:
-        return "[ERROR] ICA_API_KEY is not set. Check your .env file."
+    api_key  = _api_key()
+    base_url = _base_url()
+    model    = _model()
 
-    url = f"{ICA_BASE_URL.rstrip('/')}/chat/completions"
+    if not api_key:
+        return "[ERROR] ICA_API_KEY is not set. Check your .env file or Streamlit secrets."
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {ICA_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": ICA_MODEL,
+        "model": model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
